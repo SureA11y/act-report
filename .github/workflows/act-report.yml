@@ -1,0 +1,72 @@
+name: ACT implementation report
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: act-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: SureA11y/core
+          path: core
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+          cache-dependency-path: core/package-lock.json
+
+      - run: npm ci
+        working-directory: core
+
+      # W3C reads the report as a claim about a published version, so it may
+      # only be published from a tree whose engine matches the tag it names.
+      - name: Decide whether the engine is a released one
+        id: gate
+        working-directory: core
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if ! git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
+            echo "::notice::v$VERSION is not tagged; generating without publishing"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif ! git diff --quiet "v$VERSION" HEAD -- src package.json; then
+            echo "::notice::src differs from v$VERSION; generating without publishing"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Exits non-zero on a false positive. That is what the weekly run is for:
+      # ACT keeps adding test cases, and one of them may reach a rule wrongly.
+      - name: Generate the report
+        run: node core/scripts/act-report.js --no-cache --out=act-report.jsonld
+
+      - name: Publish
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add act-report.jsonld
+          if git diff --cached --quiet; then
+            echo "Report unchanged."
+            exit 0
+          fi
+          CASES="$(node -p "JSON.parse(require('fs').readFileSync('act-report.jsonld','utf8'))['@graph'].filter((n) => n['@type'] === 'TestSubject').length")"
+          git commit -m "Regenerate the implementation report for core ${{ steps.gate.outputs.version }}" \
+                     -m "$CASES ACT test cases, no false positives."
+          git push
