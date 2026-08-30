@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SureA11y — ACT implementation report</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    max-width: 42rem;
+    margin: 0 auto;
+    padding: 2rem 1rem;
+    font: 1rem/1.6 system-ui, sans-serif;
+    color: #14161a;
+    background: #fff;
+  }
+  a { color: #0b4fa8; }
+  a:focus-visible { outline: 3px solid #0b4fa8; outline-offset: 2px; }
+  code { font-size: 0.9375em; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #e8eaed; background: #14161a; }
+    a { color: #8fb8f2; }
+    a:focus-visible { outline-color: #8fb8f2; }
+  }
+</style>
+</head>
+<body>
+<h1>SureA11y — ACT implementation report</h1>
+
+<p>
+  This repository hosts the
+  <a href="https://www.w3.org/WAI/standards-guidelines/act/">W3C ACT</a>
+  implementation report for the
+  <a href="https://github.com/SureA11y/core">SureA11y accessibility engine</a>,
+  expressed as
+  <a href="https://www.w3.org/WAI/standards-guidelines/act/report/earl/">EARL</a>
+  in JSON-LD.
+</p>
+
+<h2>The report</h2>
+<p>
+  <a href="act-report.jsonld"><code>act-report.jsonld</code></a>
+</p>
+<p>
+  W3C re-downloads this URL daily. The path is stable and will not move.
+</p>
+
+<h2>How it is produced</h2>
+<p>
+  The report is generated against a released tag of the engine rather than a
+  working tree, so it can be reproduced from the same inputs. Every release
+  regenerates it. Outcomes are recorded for each applicable ACT test case,
+  including passes and inapplicable cases.
+</p>
+<p>
+  Listing on the W3C implementations page is not endorsement, and W3C does not
+  verify the data.
+</p>
+
+<h2>Maintainer</h2>
+<p>
+  Jorge Rumoroso — <a href="https://github.com/rumoroso">github.com/rumoroso</a>
+</p>
+</body>
+</html>
