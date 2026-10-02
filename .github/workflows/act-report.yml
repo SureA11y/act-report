@@ -16,15 +16,15 @@ jobs:
   report:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: SureA11y/core
           path: core
           fetch-depth: 0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22.x
           cache: npm
@@ -35,6 +35,7 @@ jobs:
 
       # W3C reads the report as a claim about a published version, so it may
       # only be published from a tree whose engine matches the tag it names.
+      # Since 1.8.0 the engine also loads profiles/ (src/coverage/standards.js).
       - name: Decide whether the engine is a released one
         id: gate
         working-directory: core
@@ -44,8 +45,8 @@ jobs:
           if ! git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
             echo "::notice::v$VERSION is not tagged; generating without publishing"
             echo "publish=false" >> "$GITHUB_OUTPUT"
-          elif ! git diff --quiet "v$VERSION" HEAD -- src package.json; then
-            echo "::notice::src differs from v$VERSION; generating without publishing"
+          elif ! git diff --quiet "v$VERSION" HEAD -- src profiles package.json; then
+            echo "::notice::the engine differs from v$VERSION; generating without publishing"
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
             echo "publish=true" >> "$GITHUB_OUTPUT"
