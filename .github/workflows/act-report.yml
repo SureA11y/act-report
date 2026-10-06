@@ -61,11 +61,18 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add act-report.jsonld
-          if git diff --cached --quiet; then
+          # The generator stamps the run date into the report. Publish only
+          # when something else changed, so the dates say when it last did.
+          git show HEAD:act-report.jsonld > "$RUNNER_TEMP/published.jsonld"
+          status=0
+          node .github/scripts/same-report.js "$RUNNER_TEMP/published.jsonld" act-report.jsonld || status=$?
+          if [ "$status" -eq 0 ]; then
             echo "Report unchanged."
             exit 0
+          elif [ "$status" -ne 1 ]; then
+            exit "$status"
           fi
+          git add act-report.jsonld
           CASES="$(node -p "JSON.parse(require('fs').readFileSync('act-report.jsonld','utf8'))['@graph'].filter((n) => n['@type'] === 'TestSubject').length")"
           git commit -m "Regenerate the implementation report for core ${{ steps.engine.outputs.version }}" \
                      -m "$CASES ACT test cases, no false positives."
