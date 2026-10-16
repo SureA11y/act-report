@@ -19,6 +19,12 @@ reaches the report within a week; it can also be run by hand from the Actions
 tab. A run that finds a false positive fails and leaves the published report
 as it was.
 
+The test cases are W3C's, the ones its implementation listing scores reports
+against, read from the corpus W3C publishes with its ACT rules; the Community
+Group's site at act-rules.github.io carries some rules in an older version and
+keeps two W3C has deprecated. Engine releases up to 1.11.1 generated the report
+against the Community Group's corpus instead.
+
 The report records the engine's outcome for every applicable ACT test case,
 including `passed` and `inapplicable` results, so "checked and found nothing"
 is distinguishable from "does not implement this rule".
