@@ -57,23 +57,72 @@ jobs:
       - name: Generate the report
         run: node core/scripts/act-report.js --no-cache --out=act-report.jsonld
 
+      # The same test cases scanned in Chromium, as the browser bindings run
+      # the engine. A release of core from before the Chromium runner has no
+      # --runner option, so there the step is skipped with a notice and the
+      # jsdom report is published alone.
+      - name: Check the engine can scan in a browser
+        id: browser
+        working-directory: core
+        run: |
+          if grep -q -- '--runner=chromium' scripts/act-report.js; then
+            echo "supported=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::core ${{ steps.engine.outputs.version }} has no Chromium runner; the browser report is not generated"
+            echo "supported=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Chromium
+        if: steps.browser.outputs.supported == 'true'
+        working-directory: core
+        run: npx playwright install --with-deps chromium
+
+      # A false positive (exit 1) fails the run, as in jsdom. A browser run
+      # that could not read every case (exit 2: w3.org rate-limits GitHub's
+      # runners, and this run fetches the pages' assets too) publishes no
+      # browser report rather than an incomplete one, and does not hold back
+      # the jsdom report.
+      - name: Generate the browser report
+        if: steps.browser.outputs.supported == 'true'
+        run: |
+          status=0
+          node core/scripts/act-report.js --no-cache --runner=chromium --out=act-report-browser.jsonld || status=$?
+          if [ "$status" -eq 2 ]; then
+            echo "::warning::the browser run could not read every test case; the browser report is not published this time"
+            rm -f act-report-browser.jsonld
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+
       - name: Publish
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          # The generator stamps the run date into the report. Publish only
-          # when something else changed, so the dates say when it last did.
-          git show HEAD:act-report.jsonld > "$RUNNER_TEMP/published.jsonld"
-          status=0
-          node .github/scripts/same-report.js "$RUNNER_TEMP/published.jsonld" act-report.jsonld || status=$?
-          if [ "$status" -eq 0 ]; then
-            echo "Report unchanged."
+          # The generator stamps the run date into each report. A report is
+          # published only when something else in it changed, so the dates say
+          # when it last did; one published for the first time always is.
+          changed=""
+          for report in act-report.jsonld act-report-browser.jsonld; do
+            [ -f "$report" ] || continue
+            status=1
+            if git show "HEAD:$report" > "$RUNNER_TEMP/published.jsonld" 2>/dev/null; then
+              status=0
+              node .github/scripts/same-report.js "$RUNNER_TEMP/published.jsonld" "$report" || status=$?
+            fi
+            if [ "$status" -eq 0 ]; then
+              echo "$report unchanged."
+            elif [ "$status" -eq 1 ]; then
+              git add "$report"
+              CASES="$(node -p "JSON.parse(require('fs').readFileSync('$report','utf8'))['@graph'].filter((n) => n['@type'] === 'TestSubject').length")"
+              changed="$changed"$'\n'"$report: $CASES ACT test cases, no false positives."
+            else
+              exit "$status"
+            fi
+          done
+          if [ -z "$changed" ]; then
+            echo "Nothing to publish."
             exit 0
-          elif [ "$status" -ne 1 ]; then
-            exit "$status"
           fi
-          git add act-report.jsonld
-          CASES="$(node -p "JSON.parse(require('fs').readFileSync('act-report.jsonld','utf8'))['@graph'].filter((n) => n['@type'] === 'TestSubject').length")"
-          git commit -m "Regenerate the implementation report for core ${{ steps.engine.outputs.version }}" \
-                     -m "$CASES ACT test cases, no false positives."
+          git commit -m "Regenerate the implementation reports for core ${{ steps.engine.outputs.version }}" \
+                     -m "${changed#$'\n'}"
           git push
