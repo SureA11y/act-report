@@ -1,0 +1,117 @@
+name: Binding parity
+
+# The browser report (act-report-browser.jsonld) says how the engine behaves
+# in Chromium, "as the browser bindings run it". This checks that claim: each
+# binding, at the version npm serves, scans every ACT test case through its
+# public API, and must give the same outcome on every one as the engine's own
+# Chromium runner, on the same machine, the same Chromium and the same page
+# bytes. A difference fails the binding's job and lists the test cases.
+#
+# It publishes nothing: the browser report stays what the engine's runner
+# gives. A red run means the report no longer speaks for that binding.
+
+on:
+  schedule:
+    # Mondays, after act-report.yml, against the same releases.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/parity/**
+      - .github/scripts/same-outcomes.js
+      - .github/actions/released-core/**
+      - .github/workflows/binding-parity.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: binding-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  parity:
+    name: ${{ matrix.binding }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - binding: playwright
+            install: '@surea11y/playwright'
+          - binding: webdriverio
+            install: '@surea11y/webdriverio webdriverio'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out the released engine
+        id: engine
+        uses: ./.github/actions/released-core
+
+      # The Chromium of the engine's locked playwright, which its own runner
+      # uses, so both scans run in the same browser.
+      - name: Install Chromium
+        working-directory: core
+        run: npx playwright install --with-deps chromium
+
+      # The binding as a user installs it, beside the released engine. The
+      # runner checks that it loads that engine, not another copy.
+      - name: Install the binding
+        working-directory: core
+        run: |
+          npm install --no-save ${{ matrix.install }}
+          npm ls @surea11y/${{ matrix.binding }} @surea11y/core
+
+      # WebdriverIO drives Chromium through ChromeDriver, which has to be of
+      # the browser's exact version: Chrome for Testing publishes one for each.
+      - name: Install ChromeDriver
+        if: matrix.binding == 'webdriverio'
+        working-directory: core
+        run: |
+          CHROME="$(node -p "require('playwright').chromium.executablePath()")"
+          VERSION="$("$CHROME" --version | grep -oE '[0-9]+(\.[0-9]+){3}')"
+          curl -fsSL -o "$RUNNER_TEMP/chromedriver.zip" \
+            "https://storage.googleapis.com/chrome-for-testing-public/$VERSION/linux64/chromedriver-linux64.zip"
+          unzip -q "$RUNNER_TEMP/chromedriver.zip" -d "$RUNNER_TEMP"
+          echo "CHROME_BINARY=$CHROME" >> "$GITHUB_ENV"
+          echo "CHROMEDRIVER_BINARY=$RUNNER_TEMP/chromedriver-linux64/chromedriver" >> "$GITHUB_ENV"
+          echo "Chromium and ChromeDriver $VERSION"
+
+      # The engine's own Chromium runner, as act-report.yml runs it, with the
+      # cache on: it fetches each file once and keeps it for the binding.
+      - name: Scan with the engine's runner
+        run: node core/scripts/act-report.js --runner=chromium --out=reference.jsonld
+
+      - name: Scan through the binding
+        env:
+          CORE_DIR: core
+          PARITY_BINDING: ${{ matrix.binding }}
+        run: >
+          node -r ./.github/parity/binding-runner.js core/scripts/act-report.js
+          --runner=chromium --out=${{ matrix.binding }}.jsonld
+
+      - name: Compare the outcomes
+        run: |
+          status=0
+          node .github/scripts/same-outcomes.js reference.jsonld ${{ matrix.binding }}.jsonld \
+            > comparison.txt || status=$?
+          cat comparison.txt
+          {
+            echo "### ${{ matrix.binding }} against core ${{ steps.engine.outputs.version }}"
+            echo '```'
+            cat comparison.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+      - name: Keep the reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: parity-${{ matrix.binding }}
+          path: |
+            reference.jsonld
+            ${{ matrix.binding }}.jsonld
+          if-no-files-found: ignore
