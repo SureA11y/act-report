@@ -55,15 +55,17 @@ could not read (a page too slow to load, or, before core 1.15, one that
 refreshes itself away mid-scan) has nothing to compare with: it is listed and
 left out with a warning, and does not fail the run. It publishes nothing.
 
-Checked: Playwright, Puppeteer, WebdriverIO and Selenium. Cypress is to
-follow, before the browser report is proposed to W3C.
+Checked: all five, Playwright, Puppeteer, WebdriverIO, Selenium and Cypress.
+Cypress loads the page under test in an iframe of its own runner, as it does
+for every Cypress user, and runs once over every test case.
 
 The bindings are scanned by `.github/parity/binding-runner.js`, which the
 engine's `scripts/act-report.js` loads as a `--runner-module` (or which
 replaces its Chromium runner, for a release from before that option), with a
 runner per binding in `.github/parity/runners/`. WebdriverIO and Selenium
 drive Chromium through ChromeDriver and share `.github/parity/bidi.js`, which
-answers the page's requests over WebDriver BiDi. The reports are compared by
+answers the page's requests over WebDriver BiDi; Cypress runs the spec in
+`.github/parity/cypress/`. The reports are compared by
 `.github/scripts/same-outcomes.js`.
 
 ## Listing

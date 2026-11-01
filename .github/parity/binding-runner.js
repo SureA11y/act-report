@@ -37,7 +37,7 @@
 const path = require('node:path');
 const { CORE_DIR, withDefaults } = require('./lib.js');
 
-const RUNNERS = ['playwright', 'puppeteer', 'webdriverio', 'selenium'];
+const RUNNERS = ['playwright', 'puppeteer', 'webdriverio', 'selenium', 'cypress'];
 const BINDING = process.env.PARITY_BINDING;
 if (!RUNNERS.includes(BINDING)) {
   throw new Error(`PARITY_BINDING must be one of ${RUNNERS.join(', ')}, not ${BINDING}`);
