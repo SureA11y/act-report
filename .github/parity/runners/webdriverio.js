@@ -33,7 +33,6 @@ async function openWebdriverioRunner(options, helpers) {
         on: (event, listener) => browser.on(event, listener),
         windowHandle: () => browser.getWindowHandle(),
         switchToWindow: (handle) => browser.switchToWindow(handle),
-        navigate: (url) => browser.url(url),
         execute: (fn) => browser.execute(fn),
         builder: () => new A11yCoreBuilder({ browser }),
         browserVersion: browser.capabilities.browserVersion,
