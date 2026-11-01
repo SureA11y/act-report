@@ -11,6 +11,11 @@
 // - pageLoadStrategy 'none'. ChromeDriver otherwise waits on every navigation
 //   the page starts, including one that is answered and abandoned, before any
 //   later command; the runner waits for the page's load itself instead.
+// - The runner navigates with BiDi itself (browsingContext.navigate, wait
+//   'none'), for every binding: navigating is the test's, not the binding's,
+//   and a navigation that waits for the load on the session's connection
+//   (selenium-webdriver's get() under BiDi) would hold the responses the
+//   page's requests are waiting for behind it.
 // - A navigation away from the test case is answered with an empty 204: a
 //   navigation that gets 204 No Content is abandoned and the page stays (HTML,
 //   "Navigation"), as Playwright's abort leaves it. Failing the request would
@@ -31,7 +36,7 @@
 //   openSession({ pageLoadStrategy, chromeArgs, loadTimeoutMs }) -> {
 //     send(method, params) -> result   a raw BiDi command
 //     on(event, listener)              a BiDi event
-//     windowHandle() / switchToWindow(handle) / navigate(url) / execute(fn)
+//     windowHandle() / switchToWindow(handle) / execute(fn)
 //     builder()                        the binding's A11yCoreBuilder for it
 //     browserVersion, close()
 //   }
@@ -154,17 +159,22 @@ async function openBidiRunner(adapter, options, helpers) {
     try {
       session.current = { tab, caseUrl, pending: 0, lastActivity: Date.now(), unreachable: null };
       await driver.switchToWindow(tab);
-      await driver.navigate(caseUrl);
+      await driver.send('browsingContext.navigate', { context: tab, url: caseUrl, wait: 'none' });
+      const started = Date.now();
+      const step = (name) => DEBUG && console.error(`${caseUrl}: ${name} at ${Date.now() - started} ms`);
       await loadAndSettle(session);
+      step('loaded and settled');
       if (session.current.unreachable) {
         throw new Error(`could not load ${session.current.unreachable}`);
       }
       if (await driver.execute(() => !!document.getElementById('xml-viewer-style'))) return null;
+      step('checked for the XML viewer');
       const result = await driver
         .builder()
         .withRules(runOnly.includeRuleIds)
         .options(engineOptions)
         .analyze();
+      step('scanned');
       return fileUnderTestCase(result, caseUrl);
     } finally {
       session.current = null;
@@ -178,7 +188,7 @@ async function openBidiRunner(adapter, options, helpers) {
   return {
     scan,
     browserVersion,
-    close: () => Promise.all(all.map((s) => s.driver.close().catch(() => {})))
+    close: () => Promise.all(all.map((s) => s.driver.close().catch((err) => DEBUG && console.error(`close: ${err.message}`))))
   };
 }
 
