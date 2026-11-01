@@ -94,8 +94,13 @@ jobs:
         include:
           - binding: playwright
             install: '@surea11y/playwright'
+          - binding: puppeteer
+            install: '@surea11y/puppeteer puppeteer'
           - binding: webdriverio
             install: '@surea11y/webdriverio webdriverio'
+            chromedriver: true
+          - binding: selenium
+            install: '@surea11y/selenium selenium-webdriver'
             chromedriver: true
     steps:
       - uses: actions/checkout@v7
@@ -112,9 +117,12 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # The binding as a user installs it, beside the released engine. The
-      # runner checks that it loads that engine, not another copy.
+      # runner checks that it loads that engine, not another copy. Puppeteer's
+      # own Chrome is not downloaded: every binding runs in the Chromium above.
       - name: Install the binding
         working-directory: core
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: 'true'
         run: |
           npm install --no-save ${{ matrix.install }}
           npm ls @surea11y/${{ matrix.binding }} @surea11y/core
