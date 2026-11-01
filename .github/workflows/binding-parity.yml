@@ -84,13 +84,20 @@ jobs:
       - name: Scan with the engine's runner
         run: node core/scripts/act-report.js --runner=chromium --out=reference.jsonld
 
+      # As a --runner-module from the engine release that has the option;
+      # preloaded, replacing the engine's runner, for an earlier one.
       - name: Scan through the binding
         env:
           CORE_DIR: core
           PARITY_BINDING: ${{ matrix.binding }}
-        run: >
-          node -r ./.github/parity/binding-runner.js core/scripts/act-report.js
-          --runner=chromium --out=${{ matrix.binding }}.jsonld
+        run: |
+          if grep -q -- '--runner-module' core/scripts/act-report.js; then
+            node core/scripts/act-report.js --runner=chromium \
+              --runner-module=.github/parity/binding-runner.js --out=${{ matrix.binding }}.jsonld
+          else
+            node -r ./.github/parity/binding-runner.js core/scripts/act-report.js \
+              --runner=chromium --out=${{ matrix.binding }}.jsonld
+          fi
 
       - name: Compare the outcomes
         run: |

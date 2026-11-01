@@ -139,9 +139,19 @@ async function openPlaywrightRunner(options, helpers) {
 }
 
 // WebDriver has no per-request fulfil of its own; WebDriver BiDi does
-// (network.addIntercept and network.provideResponse), and webdriverio exposes
-// it. A new session per test case is the fresh state a new Playwright context
-// gives.
+// (network.addIntercept, network.provideResponse), and webdriverio exposes it.
+// The fresh state a new Playwright context gives is a BiDi user context here:
+// each test case gets a tab of its own in a new one, in one of a few
+// long-lived sessions, one per test case the generator runs at a time.
+//
+// Two things WebDriver needs that Playwright doesn't:
+// - pageLoadStrategy 'none'. ChromeDriver otherwise waits on every navigation
+//   the page starts, including one that is answered and abandoned, before any
+//   later command; the runner waits for the page's load itself instead.
+// - A navigation away from the test case is answered with an empty 204: a
+//   navigation that gets 204 No Content is abandoned and the page stays (HTML,
+//   "Navigation"), as Playwright's abort leaves it. Failing the request would
+//   replace the page with an error page.
 async function openWebdriverioRunner(options, helpers) {
   const { cachedResponse, leavesTestCase, SETTLE_MS, NAVIGATION_TIMEOUT_MS } = helpers;
   const bindingVersion = checkEngineVersion('@surea11y/webdriverio');
@@ -150,37 +160,52 @@ async function openWebdriverioRunner(options, helpers) {
   for (const name of ['CHROME_BINARY', 'CHROMEDRIVER_BINARY']) {
     if (!process.env[name]) throw new Error(`webdriverio needs ${name}`);
   }
-  const capabilities = {
-    browserName: 'chrome',
-    webSocketUrl: true,
-    'goog:chromeOptions': {
-      binary: process.env.CHROME_BINARY,
-      args: ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
-    },
-    'wdio:chromedriverOptions': { binary: process.env.CHROMEDRIVER_BINARY }
+  const sessionOptions = {
+    logLevel: 'error',
+    connectionRetryTimeout: NAVIGATION_TIMEOUT_MS * 2,
+    capabilities: {
+      browserName: 'chrome',
+      webSocketUrl: true,
+      pageLoadStrategy: 'none',
+      'goog:chromeOptions': {
+        binary: process.env.CHROME_BINARY,
+        args: ['--headless=new', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage']
+      },
+      'wdio:chromedriverOptions': { binary: process.env.CHROMEDRIVER_BINARY }
+    }
   };
 
-  async function openSession(caseUrl) {
-    const browser = await remote({ logLevel: 'error', capabilities });
-    // The top-level browsing context: its window handle, under BiDi.
-    const top = await browser.getWindowHandle();
-    const state = { pending: 0, lastActivity: Date.now(), unreachable: null };
+  const textHeader = (name, value) => ({ name, value: { type: 'string', value } });
+
+  async function openSession() {
+    const browser = await remote(sessionOptions);
+    const session = { browser, home: await browser.getWindowHandle(), current: null };
     await browser.sessionSubscribe({ events: ['network.beforeRequestSent'] });
     await browser.networkAddIntercept({ phases: ['beforeRequestSent'] });
     browser.on('network.beforeRequestSent', async (event) => {
       if (!event.isBlocked) return;
+      const current = session.current;
       const request = event.request.request;
       const url = event.request.url;
-      state.pending += 1;
-      state.lastActivity = Date.now();
+      if (current) {
+        current.pending += 1;
+        current.lastActivity = Date.now();
+      }
       try {
         if (
+          current &&
           leavesTestCase &&
           event.navigation &&
-          event.context === top &&
-          leavesTestCase(url, caseUrl)
+          event.context === current.tab &&
+          leavesTestCase(url, current.caseUrl)
         ) {
-          await browser.networkFailRequest({ request });
+          await browser.networkProvideResponse({
+            request,
+            statusCode: 204,
+            reasonPhrase: 'No Content',
+            headers: [],
+            body: { type: 'string', value: '' }
+          });
           return;
         }
         if (!/^https?:/.test(url)) {
@@ -191,53 +216,67 @@ async function openWebdriverioRunner(options, helpers) {
         try {
           res = await cachedResponse(url, options);
         } catch (err) {
-          state.unreachable = state.unreachable || `${url}: ${err.message}`;
+          if (current) current.unreachable = current.unreachable || `${url}: ${err.message}`;
           await browser.networkFailRequest({ request });
           return;
         }
-        const headers = res.contentType
-          ? [{ name: 'content-type', value: { type: 'string', value: res.contentType } }]
-          : [];
         await browser.networkProvideResponse({
           request,
           statusCode: res.status,
           reasonPhrase: res.status === 200 ? 'OK' : '',
-          headers,
+          headers: res.contentType ? [textHeader('content-type', res.contentType)] : [],
           body: { type: 'base64', value: Buffer.from(res.body).toString('base64') }
         });
       } catch {
-        // The page may have moved on and dropped the request.
+        // The tab may have closed and dropped the request.
       } finally {
-        state.pending -= 1;
-        state.lastActivity = Date.now();
+        if (current) {
+          current.pending -= 1;
+          current.lastActivity = Date.now();
+        }
       }
     });
-    return { browser, state };
+    return session;
   }
 
-  // Playwright's networkidle, as near as WebDriver allows: no request in
-  // flight for QUIET_MS, or SETTLE_MS at most.
-  async function settle(state) {
+  const idle = [await openSession()];
+  const all = [...idle];
+  const browserVersion = idle[0].browser.capabilities.browserVersion;
+  async function acquire() {
+    if (idle.length) return idle.pop();
+    const session = await openSession();
+    all.push(session);
+    return session;
+  }
+
+  // The page's load, then Playwright's networkidle as near as WebDriver
+  // allows: no request in flight for QUIET_MS, or SETTLE_MS at most.
+  async function loadAndSettle(session) {
+    const { browser, current } = session;
+    await browser.waitUntil(
+      () => browser.execute(() => document.readyState === 'complete'),
+      { timeout: NAVIGATION_TIMEOUT_MS, interval: 50, timeoutMsg: `${current.caseUrl} did not load` }
+    );
     const until = Date.now() + SETTLE_MS;
     while (Date.now() < until) {
-      if (state.pending === 0 && Date.now() - state.lastActivity >= QUIET_MS) return;
+      if (current.pending === 0 && Date.now() - current.lastActivity >= QUIET_MS) return;
       await new Promise((r) => setTimeout(r, 50));
     }
   }
 
-  // The engine's report generator runs several test cases at once; one
-  // session each, never shared.
-  const probe = await remote({ logLevel: 'error', capabilities });
-  const browserVersion = probe.capabilities.browserVersion;
-  await probe.deleteSession();
-
   async function scan(caseUrl, { runOnly, engineOptions }) {
-    const { browser, state } = await openSession(caseUrl);
+    const session = await acquire();
+    const { browser } = session;
+    const { userContext } = await browser.browserCreateUserContext({});
+    const { context: tab } = await browser.browsingContextCreate({ type: 'tab', userContext });
     try {
-      await browser.setTimeout({ pageLoad: NAVIGATION_TIMEOUT_MS });
+      session.current = { tab, caseUrl, pending: 0, lastActivity: Date.now(), unreachable: null };
+      await browser.switchToWindow(tab);
       await browser.url(caseUrl);
-      await settle(state);
-      if (state.unreachable) throw new Error(`could not load ${state.unreachable}`);
+      await loadAndSettle(session);
+      if (session.current.unreachable) {
+        throw new Error(`could not load ${session.current.unreachable}`);
+      }
       if (await browser.execute(() => !!document.getElementById('xml-viewer-style'))) return null;
       const result = await new A11yCoreBuilder({ browser })
         .withRules(runOnly.includeRuleIds)
@@ -245,14 +284,18 @@ async function openWebdriverioRunner(options, helpers) {
         .analyze();
       return fileUnderTestCase(result, caseUrl);
     } finally {
-      await browser.deleteSession().catch(() => {});
+      session.current = null;
+      await browser.browsingContextClose({ context: tab }).catch(() => {});
+      await browser.browserRemoveUserContext({ userContext }).catch(() => {});
+      await browser.switchToWindow(session.home).catch(() => {});
+      idle.push(session);
     }
   }
 
   return {
     scan,
     version: `Chrome/${browserVersion}, @surea11y/webdriverio ${bindingVersion}`,
-    close: async () => {}
+    close: () => Promise.all(all.map((s) => s.browser.deleteSession().catch(() => {})))
   };
 }
 
