@@ -57,9 +57,20 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # As act-report.yml runs it, with the cache on: each file is fetched
-      # once and kept, in core/.act-cache, for the binding jobs.
+      # once and kept, in core/.act-cache, for the binding jobs. A test case it
+      # could not read (exit 2: a page that did not load in time, or one that
+      # refreshes itself away before 1.15) has nothing to compare with, and is
+      # left out of every comparison with a warning; a false positive (exit 1)
+      # fails the run.
       - name: Scan with the engine's runner
-        run: node core/scripts/act-report.js --runner=chromium --out=reference.jsonld
+        run: |
+          status=0
+          node core/scripts/act-report.js --runner=chromium --out=reference.jsonld || status=$?
+          if [ "$status" -eq 2 ]; then
+            echo "::warning::The engine's runner could not read every test case; those it could not are left out of the comparison."
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
 
       - name: Keep the reference and the page cache
         uses: actions/upload-artifact@v7
@@ -135,19 +146,24 @@ jobs:
           name: parity-reference
 
       # As a --runner-module from the engine release that has the option;
-      # preloaded, replacing the engine's runner, for an earlier one.
+      # preloaded, replacing the engine's runner, for an earlier one. A false
+      # positive (exit 1) or a test case it could not read (exit 2) is for the
+      # comparison to judge against the reference; a run that wrote no report
+      # fails there too.
       - name: Scan through the binding
         env:
           CORE_DIR: core
           PARITY_BINDING: ${{ matrix.binding }}
         run: |
+          status=0
           if grep -q -- '--runner-module' core/scripts/act-report.js; then
             node core/scripts/act-report.js --runner=chromium \
-              --runner-module=.github/parity/binding-runner.js --out=${{ matrix.binding }}.jsonld
+              --runner-module=.github/parity/binding-runner.js --out=${{ matrix.binding }}.jsonld || status=$?
           else
             node -r ./.github/parity/binding-runner.js core/scripts/act-report.js \
-              --runner=chromium --out=${{ matrix.binding }}.jsonld
+              --runner=chromium --out=${{ matrix.binding }}.jsonld || status=$?
           fi
+          if [ "$status" -gt 2 ]; then exit "$status"; fi
 
       - name: Compare the outcomes
         run: |

@@ -50,7 +50,10 @@ file from w3.org once; every binding then scans from its cache, in the same
 Chromium, so the binding is the only difference, and w3.org, which
 rate-limits GitHub's runners, is asked for the corpus once a run. A
 difference fails that binding's job and lists the test cases; the reports of
-both runs are kept as the job's artifacts. It publishes nothing.
+both runs are kept as the job's artifacts. A test case the engine's own runner
+could not read (a page too slow to load, or, before core 1.15, one that
+refreshes itself away mid-scan) has nothing to compare with: it is listed and
+left out with a warning, and does not fail the run. It publishes nothing.
 
 Checked: Playwright and WebdriverIO. Puppeteer, Selenium and Cypress are to
 follow, before the browser report is proposed to W3C.
