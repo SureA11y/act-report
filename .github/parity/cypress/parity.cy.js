@@ -74,6 +74,8 @@ describe('ACT test cases', () => {
         // the result back to be recorded here.
         return cy
           .origin(origin, { args: testCase }, (tc) => {
+            // The handler above is this origin's too only once set here.
+            Cypress.on('uncaught:exception', () => false);
             const { A11yCoreBuilder: Builder } = Cypress.require('@surea11y/cypress');
             return cy.document({ log: false }).then((doc) => {
               if (doc.getElementById('xml-viewer-style')) return { xmlViewer: true };
