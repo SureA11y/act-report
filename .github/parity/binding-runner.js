@@ -186,6 +186,11 @@ async function openWebdriverioRunner(options, helpers) {
 
   async function openSession() {
     const browser = await remote(sessionOptions);
+    // The binding's scan is a synchronous script, under WebDriver's script
+    // timeout (30 s by default). A page still taking a large body through
+    // ChromeDriver can hold it past that on a slow runner (f51b46's video on
+    // GitHub's), so it gets as long as loading does: a wait, not an outcome.
+    await browser.setTimeout({ script: loadTimeoutMs });
     const session = { browser, home: await browser.getWindowHandle(), current: null };
     await browser.sessionSubscribe({ events: ['network.beforeRequestSent'] });
     await browser.networkAddIntercept({ phases: ['beforeRequestSent'] });
