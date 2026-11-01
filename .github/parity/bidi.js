@@ -137,7 +137,15 @@ async function openBidiRunner(adapter, options, helpers) {
   // allows: no request in flight for QUIET_MS, or SETTLE_MS at most.
   async function loadAndSettle({ driver, current }) {
     const until = Date.now() + loadTimeoutMs;
-    while (!(await driver.execute(() => document.readyState === 'complete'))) {
+    // A page that navigates to another site has no document to ask for a
+    // moment, while Chromium moves it to another process: that is a page
+    // still loading, not a failed scan.
+    const loaded = () =>
+      driver.execute(() => document.readyState === 'complete').catch((err) => {
+        if (Date.now() > until) throw err;
+        return false;
+      });
+    while (!(await loaded())) {
       if (Date.now() > until) throw new Error(`${current.caseUrl} did not load`);
       await new Promise((r) => setTimeout(r, 50));
     }
