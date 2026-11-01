@@ -38,6 +38,25 @@ Each report records the engine's outcome for every applicable ACT test case,
 including `passed` and `inapplicable` results, so "checked and found nothing"
 is distinguishable from "does not implement this rule".
 
+## Binding parity
+
+The browser report says how the engine behaves "as the browser bindings run
+it". `binding-parity.yml` checks that every Monday, by hand from the Actions
+tab, and on pull requests that change it: each binding, at the version npm
+serves, scans every test case through its public API, as a user's test does,
+with no hooks installed, and must give the same outcome on every one as the
+engine's own Chromium runner on the same machine. Both scan the same bytes in
+the same Chromium, from one cache, so the binding is the only difference. A
+difference fails that binding's job and lists the test cases; the reports of
+both runs are kept as the job's artifacts. It publishes nothing.
+
+Checked: Playwright and WebdriverIO. Puppeteer, Selenium and Cypress are to
+follow, before the browser report is proposed to W3C.
+
+The bindings are scanned by `.github/parity/binding-runner.js`, which replaces
+the engine's Chromium runner in `scripts/act-report.js` for the run, and
+compared by `.github/scripts/same-outcomes.js`.
+
 ## Listing
 
 The jsdom report was proposed for W3C's
