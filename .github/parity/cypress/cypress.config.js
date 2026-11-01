@@ -38,6 +38,9 @@ module.exports = defineConfig({
   video: false,
   screenshotOnRunFailure: false,
   e2e: {
+    // A test case that navigates to another origin is scanned there, inside
+    // cy.origin(), which loads the binding with Cypress.require().
+    experimentalOriginDependencies: true,
     specPattern: 'parity.cy.js',
     supportFile: false,
     pageLoadTimeout: Number(process.env.PARITY_LOAD_TIMEOUT_MS) || 120000,
