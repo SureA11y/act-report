@@ -179,7 +179,7 @@ jobs:
         run: |
           status=0
           node .github/scripts/same-outcomes.js reference.jsonld ${{ matrix.binding }}.jsonld \
-            > comparison.txt || status=$?
+            --binding=${{ matrix.binding }} > comparison.txt || status=$?
           cat comparison.txt
           {
             echo "### ${{ matrix.binding }} against core ${{ steps.engine.outputs.version }}"

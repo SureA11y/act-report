@@ -57,7 +57,20 @@ left out with a warning, and does not fail the run. It publishes nothing.
 
 Checked: all five, Playwright, Puppeteer, WebdriverIO, Selenium and Cypress.
 Cypress loads the page under test in an iframe of its own runner, as it does
-for every Cypress user, and runs once over every test case.
+for every Cypress user, and runs once over every test case. A page that moves
+itself to another site is scanned there, inside `cy.origin()`.
+
+Cypress gives two differences that are its platform's, not the binding's, and
+the comparison expects them, listing each test case with its reason in the
+job summary; any other difference fails it as for the other bindings:
+
+- Contrast on a page that paints no background: in a frame, the page's canvas
+  can let the parent page show through, so the engine asks about it
+  (`contrast-computable` is `cantTell`) and leaves the text out of the ratio
+  rules (`inapplicable`), where in a top-level page it measures it on the
+  canvas and passes. A more careful answer, never a `fail`.
+- A standalone SVG or XML document: `cy.visit()` opens only `text/html`, so
+  there is no result for it, for any Cypress user.
 
 The bindings are scanned by `.github/parity/binding-runner.js`, which the
 engine's `scripts/act-report.js` loads as a `--runner-module` (or which
