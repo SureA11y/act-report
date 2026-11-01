@@ -5,25 +5,34 @@
 // the provenance node are left out, since a binding's report and the
 // engine's own differ in those by design.
 //
-// Exits 0 when every outcome matches, 1 when any differs, and 2 when either
-// file cannot be read as a report. Each difference is listed, grouped by how
-// the outcome changed.
+// A test case the reference has no assertion on at all is one the engine's
+// own runner could not read (act-report.js leaves such a case out of the
+// report and exits 2). There is nothing to compare it with, so it is listed
+// and left out, with a warning, rather than failing the comparison: the
+// binding is not at fault. A test case the reference read and the other
+// report did not is a difference like any other.
+//
+// Exits 0 when every outcome compared matches, 1 when any differs, and 2
+// when either file cannot be read as a report.
 //
 //   node .github/scripts/same-outcomes.js reference.jsonld binding.jsonld
 
 const fs = require('node:fs');
 
+// Outcome by rule, by test case.
 function outcomesOf(file) {
   const report = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (!Array.isArray(report['@graph'])) throw new Error(`${file} has no @graph`);
-  const outcomes = new Map();
+  const subjects = new Map();
   for (const node of report['@graph']) {
     if (node['@type'] !== 'TestSubject') continue;
+    const outcomes = subjects.get(node.source) || new Map();
     for (const assertion of node.assertions || []) {
-      outcomes.set(`${node.source} ${assertion.test.title}`, assertion.result.outcome);
+      outcomes.set(assertion.test.title, assertion.result.outcome);
     }
+    subjects.set(node.source, outcomes);
   }
-  return outcomes;
+  return subjects;
 }
 
 const [referenceFile, otherFile] = process.argv.slice(2);
@@ -37,23 +46,41 @@ try {
   process.exit(2);
 }
 
+const unreadByReference = [...other.keys()].filter((source) => !reference.has(source)).sort();
+
 const changes = new Map();
-for (const key of new Set([...reference.keys(), ...other.keys()])) {
-  const from = reference.get(key) || 'no assertion';
-  const to = other.get(key) || 'no assertion';
-  if (from === to) continue;
-  const change = `${from} -> ${to}`;
-  if (!changes.has(change)) changes.set(change, []);
-  changes.get(change).push(key);
+let compared = 0;
+for (const [source, referenceOutcomes] of reference) {
+  const otherOutcomes = other.get(source) || new Map();
+  for (const rule of new Set([...referenceOutcomes.keys(), ...otherOutcomes.keys()])) {
+    compared += 1;
+    const from = referenceOutcomes.get(rule) || 'no assertion';
+    const to = otherOutcomes.get(rule) || 'no assertion';
+    if (from === to) continue;
+    const change = `${from} -> ${to}`;
+    if (!changes.has(change)) changes.set(change, []);
+    changes.get(change).push(`${source} ${rule}`);
+  }
 }
 
 const differing = [...changes.values()].reduce((n, keys) => n + keys.length, 0);
 console.log(
-  `${reference.size} assertions in ${referenceFile}, ${other.size} in ${otherFile}: ` +
+  `${compared} assertions compared on the ${reference.size} test cases ${referenceFile} has: ` +
     `${differing ? `${differing} differ` : 'every outcome matches'}.`
 );
 for (const [change, keys] of changes) {
   console.log(`\n${change} (${keys.length}):`);
   for (const key of keys.sort()) console.log(`  ${key}`);
+}
+if (unreadByReference.length) {
+  console.log(
+    `\n${unreadByReference.length} test case(s) the engine's runner could not read, left out:`
+  );
+  for (const source of unreadByReference) console.log(`  ${source}`);
+  if (process.env.GITHUB_ACTIONS) {
+    console.log(
+      `::warning::${unreadByReference.length} test case(s) the engine's runner could not read were left out of the comparison`
+    );
+  }
 }
 process.exit(differing ? 1 : 0);
