@@ -38,6 +38,15 @@ Each report records the engine's outcome for every applicable ACT test case,
 including `passed` and `inapplicable` results, so "checked and found nothing"
 is distinguishable from "does not implement this rule".
 
+## Listing
+
+The jsdom report was proposed for W3C's
+[ACT implementations](https://www.w3.org/WAI/standards-guidelines/act/implementations/)
+page as "SureA11y" in
+[w3c/wcag-act-rules#465](https://github.com/w3c/wcag-act-rules/issues/465).
+The browser report will be proposed in a request of its own, as "SureA11y in a
+browser", once each browser binding is shown to give its results.
+
 Listing on the W3C implementations page is not endorsement, and W3C does not
 verify the data.
 
