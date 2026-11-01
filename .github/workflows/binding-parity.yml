@@ -4,8 +4,14 @@ name: Binding parity
 # in Chromium, "as the browser bindings run it". This checks that claim: each
 # binding, at the version npm serves, scans every ACT test case through its
 # public API, and must give the same outcome on every one as the engine's own
-# Chromium runner, on the same machine, the same Chromium and the same page
-# bytes. A difference fails the binding's job and lists the test cases.
+# Chromium runner, in the same Chromium and on the same page bytes. A
+# difference fails the binding's job and lists the test cases.
+#
+# The engine's runner scans first, in a job of its own, and fetches every file
+# from w3.org once; the binding jobs scan from its cache and fetch nothing.
+# w3.org rate-limits GitHub's runners, and several jobs fetching the corpus at
+# once get turned away. The cache also makes the bytes the same for every
+# binding, not only the same URLs.
 #
 # It publishes nothing: the browser report stays what the engine's runner
 # gives. A red run means the report no longer speaks for that binding.
@@ -31,8 +37,44 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  reference:
+    name: engine's runner
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      version: ${{ steps.engine.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check out the released engine
+        id: engine
+        uses: ./.github/actions/released-core
+
+      # The Chromium of the engine's locked playwright, which its own runner
+      # uses and every binding job is pointed at.
+      - name: Install Chromium
+        working-directory: core
+        run: npx playwright install --with-deps chromium
+
+      # As act-report.yml runs it, with the cache on: each file is fetched
+      # once and kept, in core/.act-cache, for the binding jobs.
+      - name: Scan with the engine's runner
+        run: node core/scripts/act-report.js --runner=chromium --out=reference.jsonld
+
+      - name: Keep the reference and the page cache
+        uses: actions/upload-artifact@v7
+        with:
+          name: parity-reference
+          path: |
+            reference.jsonld
+            core/.act-cache
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
   parity:
     name: ${{ matrix.binding }}
+    needs: reference
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -43,15 +85,17 @@ jobs:
             install: '@surea11y/playwright'
           - binding: webdriverio
             install: '@surea11y/webdriverio webdriverio'
+            chromedriver: true
     steps:
       - uses: actions/checkout@v7
 
+      # The release the reference job scanned, not whatever npm serves by now.
       - name: Check out the released engine
         id: engine
         uses: ./.github/actions/released-core
+        with:
+          version: ${{ needs.reference.outputs.version }}
 
-      # The Chromium of the engine's locked playwright, which its own runner
-      # uses, so both scans run in the same browser.
       - name: Install Chromium
         working-directory: core
         run: npx playwright install --with-deps chromium
@@ -64,25 +108,31 @@ jobs:
           npm install --no-save ${{ matrix.install }}
           npm ls @surea11y/${{ matrix.binding }} @surea11y/core
 
-      # WebdriverIO drives Chromium through ChromeDriver, which has to be of
-      # the browser's exact version: Chrome for Testing publishes one for each.
-      - name: Install ChromeDriver
-        if: matrix.binding == 'webdriverio'
+      # The bindings that don't launch the engine's Chromium themselves are
+      # pointed at it.
+      - name: Locate Chromium
         working-directory: core
         run: |
           CHROME="$(node -p "require('playwright').chromium.executablePath()")"
-          VERSION="$("$CHROME" --version | grep -oE '[0-9]+(\.[0-9]+){3}')"
-          curl -fsSL -o "$RUNNER_TEMP/chromedriver.zip" \
-            "https://storage.googleapis.com/chrome-for-testing-public/$VERSION/linux64/chromedriver-linux64.zip"
-          unzip -q "$RUNNER_TEMP/chromedriver.zip" -d "$RUNNER_TEMP"
           echo "CHROME_BINARY=$CHROME" >> "$GITHUB_ENV"
-          echo "CHROMEDRIVER_BINARY=$RUNNER_TEMP/chromedriver-linux64/chromedriver" >> "$GITHUB_ENV"
-          echo "Chromium and ChromeDriver $VERSION"
+          echo "CHROME_VERSION=$("$CHROME" --version | grep -oE '[0-9]+(\.[0-9]+){3}')" >> "$GITHUB_ENV"
 
-      # The engine's own Chromium runner, as act-report.yml runs it, with the
-      # cache on: it fetches each file once and keeps it for the binding.
-      - name: Scan with the engine's runner
-        run: node core/scripts/act-report.js --runner=chromium --out=reference.jsonld
+      # A binding that drives Chromium through ChromeDriver needs the one of
+      # the browser's exact version: Chrome for Testing publishes one for each.
+      - name: Install ChromeDriver
+        if: matrix.chromedriver
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/chromedriver.zip" \
+            "https://storage.googleapis.com/chrome-for-testing-public/$CHROME_VERSION/linux64/chromedriver-linux64.zip"
+          unzip -q "$RUNNER_TEMP/chromedriver.zip" -d "$RUNNER_TEMP"
+          echo "CHROMEDRIVER_BINARY=$RUNNER_TEMP/chromedriver-linux64/chromedriver" >> "$GITHUB_ENV"
+          echo "Chromium and ChromeDriver $CHROME_VERSION"
+
+      # reference.jsonld, and the page cache back into core/.act-cache.
+      - name: Get the reference and the page cache
+        uses: actions/download-artifact@v8
+        with:
+          name: parity-reference
 
       # As a --runner-module from the engine release that has the option;
       # preloaded, replacing the engine's runner, for an earlier one.
@@ -113,12 +163,10 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
 
-      - name: Keep the reports
+      - name: Keep the binding's report
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: parity-${{ matrix.binding }}
-          path: |
-            reference.jsonld
-            ${{ matrix.binding }}.jsonld
+          path: ${{ matrix.binding }}.jsonld
           if-no-files-found: ignore
