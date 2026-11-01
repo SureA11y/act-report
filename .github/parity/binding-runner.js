@@ -20,7 +20,8 @@
 //
 // PARITY_BINDING is playwright or webdriverio. webdriverio also needs
 // CHROME_BINARY and CHROMEDRIVER_BINARY, a Chromium and the ChromeDriver of
-// the same version.
+// the same version. PARITY_DEBUG=1 logs each request webdriverio answers, and
+// any it could not.
 //
 // What it keeps the same as the engine's runner, so the binding is the only
 // difference: a fresh browser state per test case; every request answered
@@ -33,6 +34,7 @@
 // installed: what a user gets from the basic setup.
 
 const path = require('node:path');
+const { STATUS_CODES } = require('node:http');
 
 const CORE_DIR = path.resolve(process.env.CORE_DIR || 'core');
 const BINDING = process.env.PARITY_BINDING;
@@ -160,9 +162,14 @@ async function openWebdriverioRunner(options, helpers) {
   for (const name of ['CHROME_BINARY', 'CHROMEDRIVER_BINARY']) {
     if (!process.env[name]) throw new Error(`webdriverio needs ${name}`);
   }
+  // A response body crosses ChromeDriver base64-encoded, far slower than
+  // Playwright's fulfil for a large file (f51b46 plays a 35 MB video, and a
+  // media element holds the page's load until its metadata arrives). The
+  // outcome is what is compared, not the time, so loading gets longer here.
+  const loadTimeoutMs = NAVIGATION_TIMEOUT_MS * 4;
   const sessionOptions = {
     logLevel: 'error',
-    connectionRetryTimeout: NAVIGATION_TIMEOUT_MS * 2,
+    connectionRetryTimeout: loadTimeoutMs * 2,
     capabilities: {
       browserName: 'chrome',
       webSocketUrl: true,
@@ -223,12 +230,17 @@ async function openWebdriverioRunner(options, helpers) {
         await browser.networkProvideResponse({
           request,
           statusCode: res.status,
-          reasonPhrase: res.status === 200 ? 'OK' : '',
+          // BiDi refuses a response whose status has no reason phrase.
+          reasonPhrase: STATUS_CODES[res.status] || 'Unknown',
           headers: res.contentType ? [textHeader('content-type', res.contentType)] : [],
           body: { type: 'base64', value: Buffer.from(res.body).toString('base64') }
         });
-      } catch {
-        // The tab may have closed and dropped the request.
+        if (process.env.PARITY_DEBUG) console.error(`served ${url} ${res.status} ${res.body.length}B`);
+      } catch (err) {
+        // A request left blocked would hold the page's load for ever: fail
+        // it instead. It may already be gone with a closed tab.
+        if (process.env.PARITY_DEBUG) console.error(`intercept ${url}: ${err.message}`);
+        await browser.networkFailRequest({ request }).catch(() => {});
       } finally {
         if (current) {
           current.pending -= 1;
@@ -255,7 +267,7 @@ async function openWebdriverioRunner(options, helpers) {
     const { browser, current } = session;
     await browser.waitUntil(
       () => browser.execute(() => document.readyState === 'complete'),
-      { timeout: NAVIGATION_TIMEOUT_MS, interval: 50, timeoutMsg: `${current.caseUrl} did not load` }
+      { timeout: loadTimeoutMs, interval: 50, timeoutMsg: `${current.caseUrl} did not load` }
     );
     const until = Date.now() + SETTLE_MS;
     while (Date.now() < until) {
