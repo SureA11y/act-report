@@ -45,8 +45,10 @@ it". `binding-parity.yml` checks that every Monday, by hand from the Actions
 tab, and on pull requests that change it: each binding, at the version npm
 serves, scans every test case through its public API, as a user's test does,
 with no hooks installed, and must give the same outcome on every one as the
-engine's own Chromium runner on the same machine. Both scan the same bytes in
-the same Chromium, from one cache, so the binding is the only difference. A
+engine's own Chromium runner. The engine's runner scans first and fetches each
+file from w3.org once; every binding then scans from its cache, in the same
+Chromium, so the binding is the only difference, and w3.org, which
+rate-limits GitHub's runners, is asked for the corpus once a run. A
 difference fails that binding's job and lists the test cases; the reports of
 both runs are kept as the job's artifacts. It publishes nothing.
 

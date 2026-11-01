@@ -5,6 +5,14 @@ description: >
   published version, so everything here runs from a release, never from core's
   main, whose src moves on as soon as a release is out.
 
+inputs:
+  version:
+    description: >
+      A version to check out instead of the one npm serves as latest, so the
+      jobs of one run all use the release the first of them resolved.
+    required: false
+    default: ''
+
 outputs:
   version:
     description: The engine version checked out, as npm serves it.
@@ -23,10 +31,12 @@ runs:
       id: engine
       shell: bash
       working-directory: core
+      env:
+        REQUESTED: ${{ inputs.version }}
       run: |
-        VERSION="$(npm view @surea11y/core dist-tags.latest)"
+        VERSION="${REQUESTED:-$(npm view @surea11y/core dist-tags.latest)}"
         if ! git rev-parse -q --verify "refs/tags/v$VERSION^{commit}" >/dev/null; then
-          echo "::error::npm serves $VERSION as latest, but core has no v$VERSION tag"
+          echo "::error::core has no v$VERSION tag for the version to check out"
           exit 1
         fi
         git checkout --detach "v$VERSION"
