@@ -102,6 +102,8 @@ jobs:
           - binding: selenium
             install: '@surea11y/selenium selenium-webdriver'
             chromedriver: true
+          - binding: cypress
+            install: '@surea11y/cypress cypress'
     steps:
       - uses: actions/checkout@v7
 
